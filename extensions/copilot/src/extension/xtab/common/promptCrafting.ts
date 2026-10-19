@@ -99,7 +99,7 @@ export function getUserPrompt(promptPieces: PromptPieces): UserPromptResult {
 
 		docsInPrompt.add(activeDoc.id); // Add active document to the set of documents in prompt
 
-		const diff = getEditDiffHistory(activeDoc, xtabHistory, docsInPrompt, computeTokens, opts.diffHistory, rejectedEditHistory, rejectedEditsMode);
+		const diff = getEditDiffHistory(activeDoc, xtabHistory, docsInPrompt, computeTokens, opts.diffHistory, rejectedEditHistory, opts.memory);
 		editDiffHistory = diff.promptPiece;
 		nDiffsInPrompt = diff.nDiffs;
 	}
@@ -314,7 +314,7 @@ export function runGlobalBudgetCascade(
 			}
 			case 'diffHistory': {
 				const overriddenDiff = { ...opts.diffHistory, maxTokens: budget };
-				const r = getEditDiffHistory(activeDoc, xtabHistory, docsInPrompt, computeTokens, overriddenDiff, rejectedEditHistory, opts.memory?.rejectedEdits);
+				const r = getEditDiffHistory(activeDoc, xtabHistory, docsInPrompt, computeTokens, overriddenDiff, rejectedEditHistory, opts.memory);
 				editDiffHistory = r.promptPiece;
 				nDiffsInPrompt = r.nDiffs;
 				tokensConsumed = r.totalTokens;
