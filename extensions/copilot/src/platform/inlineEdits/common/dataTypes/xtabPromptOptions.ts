@@ -95,7 +95,7 @@ export enum RejectedEditsMemoryMode {
 	DiffWithTags = 'diffWithTags',
 	/**
 	 * Rejected hunks are rendered as ordinary edit history (applied, then undone by the developer),
-	 * with no tag and no instruction. Only recent rejections in the active document whose lines are unchanged are used.
+	 * with no tag and no instruction. Only rejections in the active document followed by at most four edit-history entries are used.
 	 */
 	AppliedThenUndone = 'appliedThenUndone',
 }

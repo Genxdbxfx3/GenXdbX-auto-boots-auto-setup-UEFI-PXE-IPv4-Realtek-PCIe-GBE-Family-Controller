@@ -283,6 +283,51 @@ describe('getEditDiffHistory', () => {
 		expect(result).not.toContain('<|rejected/|>');
 	});
 
+	it.each(['one diff', 'one token less than the pair'])('skips the entire applied-then-undone pair when the budget fits %s without starving normal history', budget => {
+		const docId = DocumentId.create('file:///workspace/src/a.ts');
+		const activeDoc = createActiveDocument(docId, new StringText('aaa\nbbb'));
+		const rejectedEntry: IXtabHistoryRejectedEditEntry = {
+			kind: 'rejectedEdit',
+			docId,
+			ordinal: 2,
+			hunks: [{ startLineNumber: 0, oldLines: ['aaa'], newLines: ['AAA'] }],
+		};
+		const normalEntry = { ...createHistoryEntry(docId, 'aaa\nbbb', [new StringReplacement(new OffsetRange(4, 7), 'BBB')]), ordinal: 1 };
+		const applied = '--- /workspace/src/a.ts\n+++ /workspace/src/a.ts\n@@ -0,1 +0,1 @@\n-aaa\n+AAA';
+		const undone = '--- /workspace/src/a.ts\n+++ /workspace/src/a.ts\n@@ -0,1 +0,1 @@\n-AAA\n+aaa';
+		const maxTokens = budget === 'one diff' ? computeTokens(applied) : computeTokens(`${applied}\n\n${undone}`) - 1;
+		const options = { ...diffHistoryOptions, maxTokens };
+
+		const result = getEditDiffHistory(activeDoc, [normalEntry], new Set(), computeTokens, options, [rejectedEntry], RejectedEditsMemoryMode.AppliedThenUndone);
+		const normalDiff = '--- /workspace/src/a.ts\n+++ /workspace/src/a.ts\n@@ -1,1 +1,1 @@\n-bbb\n+BBB';
+
+		expect(result).toEqual({
+			promptPiece: `${normalDiff}\n`,
+			nDiffs: 1,
+			totalTokens: computeTokens(normalDiff),
+		});
+	});
+
+	it.each([0, 1])('keeps an applied-then-undone pair atomic with nEntries=%i and exactly enough tokens', nEntries => {
+		const docId = DocumentId.create('file:///workspace/src/a.ts');
+		const activeDoc = createActiveDocument(docId, new StringText('aaa\nbbb'));
+		const rejectedEntry: IXtabHistoryRejectedEditEntry = {
+			kind: 'rejectedEdit',
+			docId,
+			ordinal: 2,
+			hunks: [{ startLineNumber: 0, oldLines: ['aaa'], newLines: ['AAA'] }],
+		};
+		const normalEntry = { ...createHistoryEntry(docId, 'aaa\nbbb', [new StringReplacement(new OffsetRange(4, 7), 'BBB')]), ordinal: 1 };
+		const pair = '--- /workspace/src/a.ts\n+++ /workspace/src/a.ts\n@@ -0,1 +0,1 @@\n-aaa\n+AAA\n\n--- /workspace/src/a.ts\n+++ /workspace/src/a.ts\n@@ -0,1 +0,1 @@\n-AAA\n+aaa';
+		const maxTokens = computeTokens(pair);
+
+		const result = getEditDiffHistory(activeDoc, [normalEntry], new Set(), computeTokens, { ...diffHistoryOptions, nEntries, maxTokens }, [rejectedEntry], RejectedEditsMemoryMode.AppliedThenUndone);
+
+		expect(result).toEqual(nEntries === 0
+			? { promptPiece: '', nDiffs: 0, totalTokens: 0 }
+			: { promptPiece: `${pair}\n`, nDiffs: 1, totalTokens: maxTokens });
+	});
+
 	it('leaves the history unchanged in applied-then-undone mode when there is no rejection', () => {
 		const docId = DocumentId.create('file:///workspace/src/a.ts');
 		const activeDoc = createActiveDocument(docId, new StringText('aaa\nbbb'));
