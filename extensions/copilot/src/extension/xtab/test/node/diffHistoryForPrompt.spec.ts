@@ -7,14 +7,14 @@ import { describe, expect, it } from 'vitest';
 import { DocumentId } from '../../../../platform/inlineEdits/common/dataTypes/documentId';
 import { Edits, RootedEdit } from '../../../../platform/inlineEdits/common/dataTypes/edit';
 import { LanguageId } from '../../../../platform/inlineEdits/common/dataTypes/languageId';
-import { DiffHistoryOptions, RejectedEditsMemoryMode } from '../../../../platform/inlineEdits/common/dataTypes/xtabPromptOptions';
+import { DEFAULT_REJECTED_EDITS_MAX_EDITS_AFTER, DiffHistoryOptions, RejectedEditsMemoryMode } from '../../../../platform/inlineEdits/common/dataTypes/xtabPromptOptions';
 import { StatelessNextEditDocument } from '../../../../platform/inlineEdits/common/statelessNextEditProvider';
 import { IXtabHistoryEditEntry, IXtabHistoryEntry, IXtabHistoryRejectedEditEntry } from '../../../../platform/inlineEdits/common/workspaceEditTracker/nesXtabHistoryTracker';
 import { LineEdit } from '../../../../util/vs/editor/common/core/edits/lineEdit';
 import { StringEdit, StringReplacement } from '../../../../util/vs/editor/common/core/edits/stringEdit';
 import { OffsetRange } from '../../../../util/vs/editor/common/core/ranges/offsetRange';
 import { StringText } from '../../../../util/vs/editor/common/core/text/abstractText';
-import { getEditDiffHistory, REJECTED_EDITS_MAX_EDITS_AFTER, selectRejectedEditsForPrompt } from '../../common/diffHistoryForPrompt';
+import { getEditDiffHistory, selectRejectedEditsForPrompt } from '../../common/diffHistoryForPrompt';
 
 const diffHistoryOptions: DiffHistoryOptions = {
 	nEntries: 10,
@@ -355,9 +355,9 @@ describe('getEditDiffHistory', () => {
 			expect(selectRejectedEditsForPrompt(undefined, [rejection(docId, 5, 1)], [], doc)).toEqual([]);
 		});
 
-		it('keeps every rejection in diffWithTags mode', () => {
+		it('keeps rejections from every document in diffWithTags mode', () => {
 			const rejections = [rejection(docId, 5, 1), rejection(otherDocId, 50, 1)];
-			expect(selectRejectedEditsForPrompt({ rejectedEdits: RejectedEditsMemoryMode.DiffWithTags }, rejections, [], doc)).toBe(rejections);
+			expect(selectRejectedEditsForPrompt({ rejectedEdits: RejectedEditsMemoryMode.DiffWithTags }, rejections, [], doc)).toEqual(rejections);
 		});
 
 		it('keeps only same-document rejections in appliedThenUndone mode', () => {
@@ -375,14 +375,25 @@ describe('getEditDiffHistory', () => {
 			expect(selectRejectedEditsForPrompt(APPLIED_THEN_UNDONE, [rejected], [], edited)).toEqual([rejected]);
 		});
 
-		it('drops a rejection once more than REJECTED_EDITS_MAX_EDITS_AFTER edits follow it in appliedThenUndone mode', () => {
+		it('drops a rejection once more than the default number of edits follow it', () => {
 			const rejected = { ...rejection(docId, 5, 1), ordinal: 10 };
 			const edit = (ordinal: number) => ({ ...createHistoryEntry(docId, 'a', [new StringReplacement(new OffsetRange(0, 1), 'b')]), ordinal });
 			const select = (history: IXtabHistoryEntry[]) => selectRejectedEditsForPrompt(APPLIED_THEN_UNDONE, [rejected], history, doc);
 			const editsAfter = (n: number) => Array.from({ length: n }, (_, i) => edit(11 + i));
 
-			expect(select([edit(9), ...editsAfter(REJECTED_EDITS_MAX_EDITS_AFTER)])).toEqual([rejected]);
-			expect(select(editsAfter(REJECTED_EDITS_MAX_EDITS_AFTER + 1))).toEqual([]);
+			expect(select([edit(9), ...editsAfter(DEFAULT_REJECTED_EDITS_MAX_EDITS_AFTER)])).toEqual([rejected]);
+			expect(select(editsAfter(DEFAULT_REJECTED_EDITS_MAX_EDITS_AFTER + 1))).toEqual([]);
+		});
+
+		it('applies the edit limit to every mode and reads it from the memory options', () => {
+			const rejected = { ...rejection(docId, 5, 1), ordinal: 10 };
+			const edit = (ordinal: number) => ({ ...createHistoryEntry(docId, 'a', [new StringReplacement(new OffsetRange(0, 1), 'b')]), ordinal });
+			const history = [edit(11), edit(12)];
+
+			for (const rejectedEdits of [RejectedEditsMemoryMode.DiffWithTags, RejectedEditsMemoryMode.AppliedThenUndone]) {
+				expect(selectRejectedEditsForPrompt({ rejectedEdits, rejectedEditsMaxEditsAfter: 2 }, [rejected], history, doc)).toEqual([rejected]);
+				expect(selectRejectedEditsForPrompt({ rejectedEdits, rejectedEditsMaxEditsAfter: 1 }, [rejected], history, doc)).toEqual([]);
+			}
 		});
 	});
 });
