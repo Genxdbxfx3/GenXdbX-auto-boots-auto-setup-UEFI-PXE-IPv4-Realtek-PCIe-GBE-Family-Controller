@@ -115,6 +115,14 @@ export enum RejectedEditsPlacement {
 	Newest = 'newest',
 }
 
+/** Which cached suggestions are marked as rejected when the user rejects a suggestion. */
+export enum RejectedEditsCacheScope {
+	/** Every cached suggestion from the same model request, including ones that were never shown. */
+	Request = 'request',
+	/** Only the suggestion that was rejected. */
+	Edit = 'edit',
+}
+
 export type PromptMemoryOptions = {
 	readonly rejectedEdits?: RejectedEditsMemoryMode;
 	/**
@@ -129,6 +137,11 @@ export type PromptMemoryOptions = {
 	readonly rejectedEditsRepetitions?: number;
 	/** At most this many of the most recent rejections are used. Applies to every `rejectedEdits` mode. Defaults to all recorded rejections. */
 	readonly rejectedEditsMaxCount?: number;
+	/**
+	 * Which cached suggestions are marked as rejected when a suggestion is rejected. Applies to every `rejectedEdits` mode;
+	 * without `rejectedEdits` the whole request is always marked. Defaults to {@link RejectedEditsCacheScope.Request}.
+	 */
+	readonly rejectedEditsCacheScope?: RejectedEditsCacheScope;
 };
 
 export namespace PromptMemoryOptions {
@@ -138,6 +151,7 @@ export namespace PromptMemoryOptions {
 		'rejectedEditsPlacement': vUnion(vEnum(RejectedEditsPlacement.InPlace, RejectedEditsPlacement.Newest), vUndefined()),
 		'rejectedEditsRepetitions': vUnion(vNumber(), vUndefined()),
 		'rejectedEditsMaxCount': vUnion(vNumber(), vUndefined()),
+		'rejectedEditsCacheScope': vUnion(vEnum(RejectedEditsCacheScope.Request, RejectedEditsCacheScope.Edit), vUndefined()),
 	});
 }
 
