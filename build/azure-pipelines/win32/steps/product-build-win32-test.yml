@@ -4,7 +4,7 @@ parameters:
   - name: VSCODE_TEST_IDS
     type: object
     default: []
-  # Whether the job built the server and web server (see product-build-win32-compile.yml)
+  # Whether to copy the server and web server into the test directory, matching what the job built (see product-build-win32-compile.yml)
   - name: VSCODE_COPY_SERVER
     type: boolean
     default: true

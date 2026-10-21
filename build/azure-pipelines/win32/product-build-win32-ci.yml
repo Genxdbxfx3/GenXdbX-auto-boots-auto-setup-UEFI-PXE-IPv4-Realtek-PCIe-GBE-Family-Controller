@@ -53,6 +53,6 @@ jobs:
           VSCODE_TEST_IDS: ${{ parameters.VSCODE_TEST_IDS }}
           # Build only what the selected tests use. In CI the agent SDK is only
           # built to catch build breaks, so one job is enough: the one running integration-electron.
-          VSCODE_BUILD_AGENT_SDK: ${{ containsValue(parameters.VSCODE_TEST_IDS, 'integration-electron') }}
-          VSCODE_BUILD_SERVER: ${{ or(containsValue(parameters.VSCODE_TEST_IDS, 'integration-electron'), containsValue(parameters.VSCODE_TEST_IDS, 'integration-agent-host-e2e'), containsValue(parameters.VSCODE_TEST_IDS, 'integration-remote'), containsValue(parameters.VSCODE_TEST_IDS, 'smoke-electron'), containsValue(parameters.VSCODE_TEST_IDS, 'smoke-remote')) }}
-          VSCODE_BUILD_WEB_SERVER: ${{ or(containsValue(parameters.VSCODE_TEST_IDS, 'integration-browser-firefox'), containsValue(parameters.VSCODE_TEST_IDS, 'smoke-browser-chromium')) }}
+          VSCODE_BUILD_AGENT_SDK: ${{ or(eq(length(parameters.VSCODE_TEST_IDS), 0), containsValue(parameters.VSCODE_TEST_IDS, 'integration-electron')) }}
+          VSCODE_BUILD_SERVER: ${{ or(eq(length(parameters.VSCODE_TEST_IDS), 0), containsValue(parameters.VSCODE_TEST_IDS, 'integration-electron'), containsValue(parameters.VSCODE_TEST_IDS, 'integration-agent-host-e2e'), containsValue(parameters.VSCODE_TEST_IDS, 'integration-remote'), containsValue(parameters.VSCODE_TEST_IDS, 'smoke-electron'), containsValue(parameters.VSCODE_TEST_IDS, 'smoke-remote')) }}
+          VSCODE_BUILD_WEB_SERVER: ${{ or(eq(length(parameters.VSCODE_TEST_IDS), 0), containsValue(parameters.VSCODE_TEST_IDS, 'integration-browser-firefox'), containsValue(parameters.VSCODE_TEST_IDS, 'smoke-browser-chromium')) }}
