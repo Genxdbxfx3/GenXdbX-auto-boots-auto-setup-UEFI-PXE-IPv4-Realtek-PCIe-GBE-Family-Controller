@@ -24,11 +24,15 @@ import { ILanguageModelToolsService, IToolData, IToolSet } from '../../../../../
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 import { IActiveSession } from '../../../../services/sessions/common/sessionsManagement.js';
 import { IAICustomizationMcpServerCountService } from '../../browser/customizationMcpServerCount.js';
-import { CustomizationLinkViewItem, readCustomizationCount } from '../../browser/customizationsToolbar.contribution.js';
+import { CUSTOMIZATION_ITEMS, CustomizationLinkViewItem, readCustomizationCount } from '../../browser/customizationsToolbar.contribution.js';
 import { CustomizationsNavigationState } from '../../browser/customizationsNavigationState.js';
 
 suite('Customizations toolbar', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('does not include standalone Remotes management in Customizations', () => {
+		assert.ok(CUSTOMIZATION_ITEMS.every(item => item.id !== 'sessions.customization.remotes'));
+	});
 
 	test('includes enabled Tools in customization totals', () => {
 		const toolSets = [
