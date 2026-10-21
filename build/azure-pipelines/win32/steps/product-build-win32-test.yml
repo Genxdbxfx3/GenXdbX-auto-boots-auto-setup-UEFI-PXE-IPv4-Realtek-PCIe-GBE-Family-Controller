@@ -97,9 +97,10 @@ steps:
     condition: succeededOrFailed()
 
   - ${{ if or(eq(parameters.VSCODE_COPY_SERVER, false), eq(parameters.VSCODE_COPY_WEB_SERVER, false)) }}:
-    # CI test jobs only copy the servers they built (see product-build-win32-compile.yml)
+    # CI test jobs build only the servers their tests use (see product-build-win32-compile.yml),
+    # so this copies the client plus whichever servers the job built
     - powershell: |
-        # Copy client, server and web builds to a separate test directory, to avoid Access Denied errors in codesign
+        # Copy the client and the servers this job built to a separate test directory, to avoid Access Denied errors in codesign
         . build/azure-pipelines/win32/exec.ps1
         $ErrorActionPreference = "Stop"
         $TestDir = "$(agent.builddirectory)\test"
