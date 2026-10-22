@@ -7,6 +7,7 @@ import * as l10n from '@vscode/l10n';
 import { CancellationToken, Command, EndOfLine, env, InlineCompletionContext, InlineCompletionDisplayLocation, InlineCompletionDisplayLocationKind, InlineCompletionEndOfLifeReason, InlineCompletionEndOfLifeReasonKind, InlineCompletionItem, InlineCompletionItemProvider, InlineCompletionList, InlineCompletionModelInfo, InlineCompletionProviderOption, InlineCompletionsDisposeReason, InlineCompletionsDisposeReasonKind, InlineCompletionTriggerKind, NotebookCell, NotebookCellKind, Position, Range, TextDocument, TextDocumentShowOptions, Uri, window, workspace } from 'vscode';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { IDiffService } from '../../../platform/diff/common/diffService';
+import { getEditedLineSpan, isSpanFullyVisible } from '../common/visibleLines';
 import { stringEditFromDiff } from '../../../platform/editing/common/edit';
 import { DocumentEditRecorder } from '../../../platform/editSurvivalTracking/common/editComputer';
 import { EditSurvivalReporter } from '../../../platform/editSurvivalTracking/common/editSurvivalReporter';
@@ -772,6 +773,21 @@ export class InlineCompletionProviderImpl extends Disposable implements InlineCo
 		);
 	}
 
+	private _wasFullyVisible(item: NesCompletionItem): boolean | undefined {
+		const info = item.info;
+		const range = item.range;
+		if (!isLlmCompletionInfo(info) || !range) {
+			return undefined;
+		}
+		const targetUri = (info.suggestion.result?.targetDocumentId ?? info.documentId).uri;
+		const editor = window.visibleTextEditors.find(e => e.document.uri.toString() === targetUri);
+		if (!editor) {
+			return false;
+		}
+		const span = getEditedLineSpan(range.start.line, range.end.line, item.insertText.toString());
+		return isSpanFullyVisible(editor.visibleRanges.map(r => ({ startLine: r.start.line, endLine: r.end.line })), span);
+	}
+
 	private _handleDidRejectCompletionItem(completionItem: NesCompletionItem): void {
 		this.logContextRecorder?.handleRejection(completionItem.info.suggestion);
 
@@ -780,7 +796,7 @@ export class InlineCompletionProviderImpl extends Disposable implements InlineCo
 
 		const info = completionItem.info;
 		if (isLlmCompletionInfo(info)) {
-			this.model.nextEditProvider.handleRejection(info.documentId, info.suggestion);
+			this.model.nextEditProvider.handleRejection(info.documentId, info.suggestion, { wasFullyVisible: this._wasFullyVisible(completionItem) });
 		} else {
 			this.model.diagnosticsBasedProvider?.handleRejection(info.documentId, info.suggestion);
 		}
