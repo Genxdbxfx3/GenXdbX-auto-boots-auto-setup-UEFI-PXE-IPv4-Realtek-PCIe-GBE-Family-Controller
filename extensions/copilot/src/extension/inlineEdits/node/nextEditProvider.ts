@@ -9,7 +9,7 @@ import { ConfigKey, IConfigurationService } from '../../../platform/configuratio
 import { DocumentId } from '../../../platform/inlineEdits/common/dataTypes/documentId';
 import { Edits, RootedEdit } from '../../../platform/inlineEdits/common/dataTypes/edit';
 import { RootedLineEdit } from '../../../platform/inlineEdits/common/dataTypes/rootedLineEdit';
-import { isRejectedEditMemoryEnabled, RejectedEditsCacheScope, SpeculativeRequestsAutoExpandEditWindowLines, SpeculativeRequestsCursorPlacement, SpeculativeRequestsEnablement } from '../../../platform/inlineEdits/common/dataTypes/xtabPromptOptions';
+import { isRejectedEditMemoryEnabled, RejectedEditsCacheScope, RejectedEditsMemoryMode, SpeculativeRequestsAutoExpandEditWindowLines, SpeculativeRequestsCursorPlacement, SpeculativeRequestsEnablement } from '../../../platform/inlineEdits/common/dataTypes/xtabPromptOptions';
 import { InlineEditRequestLogContext, type MarkdownLoggable } from '../../../platform/inlineEdits/common/inlineEditLogContext';
 import { IInlineEditsModelService } from '../../../platform/inlineEdits/common/inlineEditsModelService';
 import { resolveModelConfigValue } from '../../../platform/inlineEdits/common/modelConfigurationResolution';
@@ -190,12 +190,17 @@ export enum NesOutcome {
 	Ignored = 'ignored',
 }
 
+export interface IRejectionOptions {
+	/** False when part of the rejected edit was outside the visible editor area, so the user could not have seen all of it. */
+	readonly wasFullyVisible?: boolean;
+}
+
 export interface INextEditProvider<T extends INextEditResult, TTelemetry, TData = void> extends IDisposable {
 	readonly ID: string;
 	getNextEdit(docId: DocumentId, context: NESInlineCompletionContext, logContext: InlineEditRequestLogContext, cancellationToken: CancellationToken, telemetryBuilder: TTelemetry, data?: TData): Promise<T>;
 	handleShown(suggestion: T): void;
 	handleAcceptance(docId: DocumentId, suggestion: T): void;
-	handleRejection(docId: DocumentId, suggestion: T): void;
+	handleRejection(docId: DocumentId, suggestion: T, options?: IRejectionOptions): void;
 	handleIgnored(docId: DocumentId, suggestion: T, supersededBy: INextEditResult | undefined): void;
 	lastRejectionTime: number;
 	lastTriggerTime: number;
@@ -1596,7 +1601,7 @@ export class NextEditProvider extends Disposable implements INextEditProvider<Ne
 		}
 	}
 
-	public handleRejection(docId: DocumentId, suggestion: NextEditResult) {
+	public handleRejection(docId: DocumentId, suggestion: NextEditResult, options?: IRejectionOptions) {
 		assertType(suggestion.result, '@ulugbekna: undefined edit cannot be rejected?');
 
 		// The user rejected the suggestion, so the speculative request (which
@@ -1611,13 +1616,16 @@ export class NextEditProvider extends Disposable implements INextEditProvider<Ne
 			this._rejectionCollector.reject(docId, suggestion.result.edit);
 			const modelConfiguration = this._modelService.selectedModelConfiguration();
 			const rejectedEditMemoryEnabled = isRejectedEditMemoryEnabled(modelConfiguration);
-			if (rejectedEditMemoryEnabled) {
+			// Only the applied-then-undone mode skips edits the user could not fully see.
+			const unseen = modelConfiguration.memory?.rejectedEdits === RejectedEditsMemoryMode.AppliedThenUndone && options?.wasFullyVisible === false;
+			if (rejectedEditMemoryEnabled && !unseen) {
 				this._xtabHistoryTracker.recordRejectedEdit(suggestion.result.targetDocumentId ?? docId, suggestion.result.documentBeforeEdits, suggestion.result.edit);
 			}
-			const onlyRejectedEntry = rejectedEditMemoryEnabled && modelConfiguration.memory?.rejectedEditsCacheScope === RejectedEditsCacheScope.Edit
-				? suggestion.result.cacheEntry
-				: undefined;
-			this._nextEditCache.rejectedNextEdit(suggestion.source.headerRequestId, onlyRejectedEntry);
+			const cacheScope = rejectedEditMemoryEnabled ? modelConfiguration.memory?.rejectedEditsCacheScope : undefined;
+			if (cacheScope !== RejectedEditsCacheScope.None) {
+				const onlyRejectedEntry = cacheScope === RejectedEditsCacheScope.Edit ? suggestion.result.cacheEntry : undefined;
+				this._nextEditCache.rejectedNextEdit(suggestion.source.headerRequestId, onlyRejectedEntry);
+			}
 		}
 
 		this._lastRejectionTime = Date.now();

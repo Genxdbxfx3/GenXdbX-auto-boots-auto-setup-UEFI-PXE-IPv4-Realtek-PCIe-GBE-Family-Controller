@@ -121,6 +121,8 @@ export enum RejectedEditsCacheScope {
 	Request = 'request',
 	/** Only the suggestion that was rejected. */
 	Edit = 'edit',
+	/** No cached suggestion is marked as rejected. */
+	None = 'none',
 }
 
 export type PromptMemoryOptions = {
@@ -151,7 +153,7 @@ export namespace PromptMemoryOptions {
 		'rejectedEditsPlacement': vUnion(vEnum(RejectedEditsPlacement.InPlace, RejectedEditsPlacement.Newest), vUndefined()),
 		'rejectedEditsRepetitions': vUnion(vNumber(), vUndefined()),
 		'rejectedEditsMaxCount': vUnion(vNumber(), vUndefined()),
-		'rejectedEditsCacheScope': vUnion(vEnum(RejectedEditsCacheScope.Request, RejectedEditsCacheScope.Edit), vUndefined()),
+		'rejectedEditsCacheScope': vUnion(vEnum(RejectedEditsCacheScope.Request, RejectedEditsCacheScope.Edit, RejectedEditsCacheScope.None), vUndefined()),
 	});
 }
 

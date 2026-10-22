@@ -194,6 +194,13 @@ describe('MODEL_CONFIGURATION_VALIDATOR', () => {
 		expect(result.content?.memory).toEqual(memory);
 	});
 
+	it('accepts cache scope none', () => {
+		const memory = { rejectedEdits: RejectedEditsMemoryMode.AppliedThenUndone, rejectedEditsCacheScope: RejectedEditsCacheScope.None };
+		const result = MODEL_CONFIGURATION_VALIDATOR.validate(baseConfig({ memory }));
+		expect(result.error).toBeUndefined();
+		expect(result.content?.memory?.rejectedEditsCacheScope).toBe('none');
+	});
+
 	it('rejects an unknown rejected-edit placement', () => {
 		const result = MODEL_CONFIGURATION_VALIDATOR.validate(baseConfig({ memory: { rejectedEdits: RejectedEditsMemoryMode.AppliedThenUndone, rejectedEditsPlacement: 'later' } as never }));
 		expect(result.error).toBeDefined();
