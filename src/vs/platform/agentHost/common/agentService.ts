@@ -1002,6 +1002,8 @@ export interface IAgentService {
 	readSavedChat?(session: URI, chat?: URI): Promise<IAgentHostSavedChat>;
 	/** Records a verified Copilot continuation and archives only safely covered saved chats. */
 	completeSavedChatContinuation?(request: IAgentHostSavedChatContinuation): Promise<IAgentHostSavedChatContinuationResult>;
+	/** Removes an Automation and returns exact backend session URIs deleted by this request. */
+	deleteAutomation?(resource: string, deleteHistory: boolean, legacySessions?: readonly URI[]): Promise<readonly string[]>;
 	/** Permanently adopts an external session without sending a message. */
 	importSession?(session: URI): Promise<void>;
 	/** Removes a recorded artifact or reference, awaiting host metadata persistence. */
@@ -1401,6 +1403,8 @@ export interface IAgentConnection {
 	authenticate(params: AuthenticateParams): Promise<AuthenticateResult>;
 	listSessions(): Promise<IAgentSessionMetadata[]>;
 	createSession(config?: IAgentCreateSessionConfig): Promise<URI>;
+	/** Requires the Automation history capability; returns exact backend session URIs deleted by this request. */
+	deleteAutomation?(resource: string, deleteHistory: boolean, legacySessions?: readonly URI[]): Promise<readonly string[]>;
 	/** Requires the VS Code session import capability advertised by initialize. */
 	importSession?(session: URI): Promise<void>;
 	/**
