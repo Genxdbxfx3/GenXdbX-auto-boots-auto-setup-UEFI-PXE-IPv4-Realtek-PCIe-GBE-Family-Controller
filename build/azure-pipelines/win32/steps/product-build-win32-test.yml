@@ -4,6 +4,13 @@ parameters:
   - name: VSCODE_TEST_IDS
     type: object
     default: []
+  # Whether to copy the server and web server into the test directory, matching what the job built (see product-build-win32-compile.yml)
+  - name: VSCODE_COPY_SERVER
+    type: boolean
+    default: true
+  - name: VSCODE_COPY_WEB_SERVER
+    type: boolean
+    default: true
 
 # Each test task records a checkpoint once it passes, and retries of the job
 # skip the test tasks that already passed in an earlier attempt of the same
@@ -89,16 +96,37 @@ steps:
     continueOnError: true
     condition: succeededOrFailed()
 
-  - powershell: |
-      # Copy client, server and web builds to a separate test directory, to avoid Access Denied errors in codesign
-      . build/azure-pipelines/win32/exec.ps1
-      $ErrorActionPreference = "Stop"
-      $TestDir = "$(agent.builddirectory)\test"
-      New-Item -ItemType Directory -Path $TestDir -Force
-      Copy-Item -Path "$(agent.builddirectory)\VSCode-win32-$(VSCODE_ARCH)" -Destination "$TestDir\VSCode-win32-$(VSCODE_ARCH)" -Recurse -Force
-      Copy-Item -Path "$(agent.builddirectory)\vscode-server-win32-$(VSCODE_ARCH)" -Destination "$TestDir\vscode-server-win32-$(VSCODE_ARCH)" -Recurse -Force
-      Copy-Item -Path "$(agent.builddirectory)\vscode-server-win32-$(VSCODE_ARCH)-web" -Destination "$TestDir\vscode-server-win32-$(VSCODE_ARCH)-web" -Recurse -Force
-    displayName: Copy builds to test directory
+  - ${{ if or(eq(parameters.VSCODE_COPY_SERVER, false), eq(parameters.VSCODE_COPY_WEB_SERVER, false)) }}:
+    # CI test jobs build only the servers their tests use (see product-build-win32-compile.yml),
+    # so this copies the client plus whichever servers the job built
+    - powershell: |
+        # Copy the client and the servers this job built to a separate test directory, to avoid Access Denied errors in codesign
+        . build/azure-pipelines/win32/exec.ps1
+        $ErrorActionPreference = "Stop"
+        $TestDir = "$(agent.builddirectory)\test"
+        New-Item -ItemType Directory -Path $TestDir -Force
+        Copy-Item -Path "$(agent.builddirectory)\VSCode-win32-$(VSCODE_ARCH)" -Destination "$TestDir\VSCode-win32-$(VSCODE_ARCH)" -Recurse -Force
+        if ($env:COPY_SERVER -eq 'True') {
+          Copy-Item -Path "$(agent.builddirectory)\vscode-server-win32-$(VSCODE_ARCH)" -Destination "$TestDir\vscode-server-win32-$(VSCODE_ARCH)" -Recurse -Force
+        }
+        if ($env:COPY_WEB_SERVER -eq 'True') {
+          Copy-Item -Path "$(agent.builddirectory)\vscode-server-win32-$(VSCODE_ARCH)-web" -Destination "$TestDir\vscode-server-win32-$(VSCODE_ARCH)-web" -Recurse -Force
+        }
+      env:
+        COPY_SERVER: ${{ parameters.VSCODE_COPY_SERVER }}
+        COPY_WEB_SERVER: ${{ parameters.VSCODE_COPY_WEB_SERVER }}
+      displayName: Copy builds to test directory
+  - ${{ else }}:
+    - powershell: |
+        # Copy client, server and web builds to a separate test directory, to avoid Access Denied errors in codesign
+        . build/azure-pipelines/win32/exec.ps1
+        $ErrorActionPreference = "Stop"
+        $TestDir = "$(agent.builddirectory)\test"
+        New-Item -ItemType Directory -Path $TestDir -Force
+        Copy-Item -Path "$(agent.builddirectory)\VSCode-win32-$(VSCODE_ARCH)" -Destination "$TestDir\VSCode-win32-$(VSCODE_ARCH)" -Recurse -Force
+        Copy-Item -Path "$(agent.builddirectory)\vscode-server-win32-$(VSCODE_ARCH)" -Destination "$TestDir\vscode-server-win32-$(VSCODE_ARCH)" -Recurse -Force
+        Copy-Item -Path "$(agent.builddirectory)\vscode-server-win32-$(VSCODE_ARCH)-web" -Destination "$TestDir\vscode-server-win32-$(VSCODE_ARCH)-web" -Recurse -Force
+      displayName: Copy builds to test directory
 
   - ${{ if containsValue(parameters.VSCODE_TEST_IDS, 'integration-agent-host-e2e') }}:
     - template: ../../common/run-test-with-checkpoint.yml@self
