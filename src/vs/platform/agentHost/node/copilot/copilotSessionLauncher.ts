@@ -519,6 +519,9 @@ export function resolveConfiguredReasoningEffortOverride(model: ModelSelection |
  * encoded for the runtime with {@link toRuntimeReasoningEffort}.
  */
 export function resolveCopilotReasoningEffort(model: ModelSelection | undefined, configurationService: Pick<IAgentConfigurationService, 'getRootValue'>, logService: ILogService, sessionId: string): SessionConfig['reasoningEffort'] {
+	if (isAutoModel(model?.id)) {
+		return undefined;
+	}
 	return toRuntimeReasoningEffort(model, resolveConfiguredReasoningEffortOverride(model, configurationService, logService, sessionId) ?? getCopilotReasoningEffort(model));
 }
 
@@ -957,7 +960,6 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 			infiniteSessions: { enabled: false },
 			memory: { enabled: false },
 			enableHostGitOperations: false,
-			remoteSession: 'off',
 			mcpOAuthTokenStorage: 'in-memory',
 			disabledMcpServers,
 			availableTools: [],
@@ -1135,6 +1137,13 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 			await raw.rpc.agent.list();
 			await this._applyScriptSafety(raw, plan.sessionId);
 			await sandboxConfig(raw);
+			if (this._configurationService.getRootValue(platformRootSchema, AgentHostSessionSyncEnabledConfigKey) === true) {
+				try {
+					await raw.rpc.remote.enable({ mode: 'export' });
+				} catch (err) {
+					this._logService.warn(`[Copilot:${plan.sessionId}] Failed to enable session history export`, err);
+				}
+			}
 			if (this._configurationService.getRootValue(platformRootSchema, AgentHostMcpConnectorsEnabledConfigKey) === true) {
 				const result = await reconcileCopilotConnectors(raw, this._logService);
 				if (result.connectorServers) {
@@ -1556,11 +1565,6 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 			// Always explicit so the VS Code opt-in gates memory instead of the runtime default.
 			// The runtime still applies the user's GitHub Copilot Memory settings and policies.
 			memory: { enabled: memoryEnabled },
-			// Per-session remote export: the client-level `--remote` flag
-			// (enableRemoteSessions) enables the CLI capability, but each
-			// session must opt in via `remoteSession` to actually export
-			// events. Without this, sessions default to "off".
-			remoteSession: this._configurationService.getRootValue(platformRootSchema, AgentHostSessionSyncEnabledConfigKey) === true ? 'export' : undefined,
 			enableManagedSettings: true,
 		};
 		return { config, modelPolicy: resolved };
