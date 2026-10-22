@@ -23,9 +23,38 @@ function isOwnModel(model: ILanguageModelChatMetadataAndIdentifier): boolean {
 }
 
 /**
+ * Whether a session type scopes the model pool to models targeting it. The local session
+ * type is the general-purpose pool and is never scoped, not even when a model targets it.
+ */
+function isSessionScoped(sessionType: string | undefined): sessionType is string {
+	return !!sessionType && sessionType !== localChatSessionType;
+}
+
+/**
+ * Whether `allModels` is a pool scoped to `sessionType` rather than the general-purpose one.
+ * Shared by the picker filter and the session-validity check so both agree on which models
+ * belong to the session's pool. This is only about scoping: mode and location support are
+ * applied by the picker (see {@link isModelEligible}), not by the validity check.
+ */
+function hasSessionScopedModels(
+	allModels: ILanguageModelChatMetadataAndIdentifier[],
+	sessionType: string | undefined,
+): boolean {
+	return isSessionScoped(sessionType) && hasModelsTargetingSession(allModels, sessionType);
+}
+
+/**
  * Filter models based on session type.
- * When a session has a specific type (and it's not 'local'), only models targeting that
- * session type are returned. Otherwise, general-purpose models are returned.
+ * When a session has a scoped model pool (see {@link hasSessionScopedModels}), models targeting that
+ * session type are returned first, followed by unscoped BYOK (custom endpoint) models.
+ * Otherwise, general-purpose models are returned.
+ *
+ * Unscoped BYOK models are registered by extensions and carry no session type, so a
+ * session-targeted pool would otherwise hide them even though they are selectable
+ * everywhere else.
+ *
+ * Every branch applies the same eligibility rules — metadata present, user-selectable, and
+ * supported in the current mode and location — through {@link isModelEligible}.
  *
  * `isUserSelectable` defaults to `true` when omitted: only an explicit `false` hides
  * the model from the picker and this model-selection flow.
@@ -36,18 +65,30 @@ export function filterModelsForSession(
 	currentModeKind: ChatModeKind,
 	location: ChatAgentLocation,
 ): ILanguageModelChatMetadataAndIdentifier[] {
-	if (sessionType && sessionType !== 'local' && hasModelsTargetingSession(models, sessionType)) {
-		return models.filter(entry =>
-			entry.metadata?.targetChatSessionType === sessionType &&
-			entry.metadata?.isUserSelectable !== false
-		);
+	if (hasSessionScopedModels(models, sessionType)) {
+		// One pass: check eligibility once, then partition so session-targeted models come first.
+		const sessionScoped: ILanguageModelChatMetadataAndIdentifier[] = [];
+		const unscopedByok: ILanguageModelChatMetadataAndIdentifier[] = [];
+		for (const entry of models) {
+			if (!isModelEligible(entry, currentModeKind, location)) {
+				continue;
+			}
+
+			// `isModelEligible` already rejects entries with missing metadata; assert for the type system.
+			const metadata = entry.metadata!;
+
+			const targetSessionType = metadata.targetChatSessionType;
+			if (targetSessionType === sessionType) {
+				sessionScoped.push(entry);
+			} else if (!targetSessionType && isByokModel(metadata)) {
+				unscopedByok.push(entry);
+			}
+		}
+		return [...sessionScoped, ...unscopedByok];
 	}
 
 	return models.filter(entry =>
-		!entry.metadata?.targetChatSessionType &&
-		entry.metadata?.isUserSelectable !== false &&
-		isModelSupportedForMode(entry, currentModeKind) &&
-		isModelSupportedForInlineChat(entry, location)
+		isModelEligible(entry, currentModeKind, location) && !entry.metadata?.targetChatSessionType
 	);
 }
 
@@ -78,7 +119,28 @@ export function isModelSupportedForInlineChat(
 }
 
 /**
+ * Whether the picker may offer this entry at all: it must carry metadata (cached entries are
+ * read back unvalidated), be user-selectable, and run in the current mode and location. Mode
+ * and location are the picker's concern — {@link isModelValidForSession} deliberately omits
+ * them because it has no mode or location to work with.
+ */
+function isModelEligible(
+	entry: ILanguageModelChatMetadataAndIdentifier,
+	currentModeKind: ChatModeKind,
+	location: ChatAgentLocation,
+): boolean {
+	const metadata = entry.metadata;
+	if (!metadata) {
+		return false;
+	}
+	return metadata.isUserSelectable !== false
+		&& isModelSupportedForMode(entry, currentModeKind)
+		&& isModelSupportedForInlineChat(entry, location);
+}
+
+/**
  * Check if any models in the pool target a specific session type.
+ * Entries without metadata (unvalidated cached entries) are ignored.
  */
 export function hasModelsTargetingSession(
 	allModels: ILanguageModelChatMetadataAndIdentifier[],
@@ -87,23 +149,45 @@ export function hasModelsTargetingSession(
 	if (!sessionType) {
 		return false;
 	}
-	return allModels.some(m => m.metadata.targetChatSessionType === sessionType);
+	return allModels.some(m => m.metadata?.targetChatSessionType === sessionType);
 }
 
 /**
- * Check if a model is valid for the current session's model pool.
- * If the session has targeted models, the model must target that session type.
- * If no models target this session, the model must not be session-specific.
+ * Check if a model belongs to the current session's model pool.
+ * If the session has a scoped pool (see {@link hasSessionScopedModels}), the model must target
+ * that session type, or be an unscoped BYOK (custom endpoint) model, which is offered alongside
+ * them. If the pool is not scoped, the model must not be session-specific — so the local session
+ * type always accepts general-purpose models, as {@link filterModelsForSession} does.
+ *
+ * A non-selectable model (an explicit `isUserSelectable: false`) is never valid: it is hidden
+ * from the picker, so a restored selection must not be treated as usable either.
+ *
+ * Only pool membership, metadata presence and selectability are validated. Mode and location
+ * compatibility are deliberately not part of this check: callers that need them pass a separate
+ * `isModelSupportedHere` predicate (see {@link shouldResetModelToDefault} and
+ * {@link resolveModelFromSyncState}), while the picker applies them through
+ * {@link isModelEligible}.
  */
 export function isModelValidForSession(
 	model: ILanguageModelChatMetadataAndIdentifier,
 	allModels: ILanguageModelChatMetadataAndIdentifier[],
 	sessionType: string | undefined,
 ): boolean {
-	if (hasModelsTargetingSession(allModels, sessionType)) {
-		return model.metadata.targetChatSessionType === sessionType;
+	// Cached entries are read back from storage unvalidated; a model without metadata cannot run.
+	const metadata = model.metadata;
+	if (!metadata) {
+		return false;
 	}
-	return !model.metadata.targetChatSessionType;
+
+	if (metadata.isUserSelectable === false) {
+		return false;
+	}
+
+	if (hasSessionScopedModels(allModels, sessionType)) {
+		return metadata.targetChatSessionType === sessionType
+			|| (!metadata.targetChatSessionType && isByokModel(metadata));
+	}
+	return !metadata.targetChatSessionType;
 }
 
 /**

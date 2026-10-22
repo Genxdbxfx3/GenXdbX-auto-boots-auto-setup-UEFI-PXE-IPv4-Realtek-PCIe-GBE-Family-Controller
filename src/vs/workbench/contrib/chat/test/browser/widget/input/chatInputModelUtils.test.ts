@@ -242,6 +242,41 @@ suite('ChatInputModelUtils', () => {
 			assert.deepStrictEqual(result.map(m => m.metadata.id), ['gpt-4o', 'claude']);
 		});
 
+		test('local session type is not scoped by models targeting local', () => {
+			const localModel = createSessionModel('local-gpt', 'Local GPT', 'local');
+			const byok = createVendorModel('openai-compatible', 'my-endpoint', 'My Endpoint');
+			const models = [localModel, gpt4o, byok];
+
+			const result = filterModelsForSession(models, 'local', ChatModeKind.Ask, ChatAgentLocation.Chat);
+
+			// 'local' is the general-purpose pool: models targeting it are ignored, and both
+			// unscoped BYOK and unscoped general models are offered.
+			assert.deepStrictEqual(result.map(m => m.metadata.id), ['gpt-4o', 'my-endpoint']);
+			// The picker and the session-validity check must agree on that pool.
+			assert.deepStrictEqual(result.filter(m => !isModelValidForSession(m, models, 'local')).map(m => m.metadata.id), []);
+			assert.strictEqual(isModelValidForSession(localModel, models, 'local'), false);
+		});
+
+		test('skips entries without metadata instead of throwing', () => {
+			// Cached model entries are read back from storage unvalidated.
+			const withoutMetadata = { identifier: 'broken/model' } as unknown as ILanguageModelChatMetadataAndIdentifier;
+			const sessionScoped = filterModelsForSession(
+				[cloudModel, withoutMetadata],
+				'cloud',
+				ChatModeKind.Ask,
+				ChatAgentLocation.Chat,
+			);
+			assert.deepStrictEqual(sessionScoped.map(m => m.metadata.id), ['cloud-gpt']);
+
+			const generalPool = filterModelsForSession(
+				[gpt4o, withoutMetadata],
+				undefined,
+				ChatModeKind.Ask,
+				ChatAgentLocation.Chat,
+			);
+			assert.deepStrictEqual(generalPool.map(m => m.metadata.id), ['gpt-4o']);
+		});
+
 		test('excludes models targeting a specific session type when in general session', () => {
 			const result = filterModelsForSession(
 				[gpt4o, claude, cloudModel],
@@ -272,7 +307,7 @@ suite('ChatInputModelUtils', () => {
 			assert.deepStrictEqual(result.map(m => m.metadata.id), ['gpt-4o']);
 		});
 
-		test.skip('filters by mode for session-targeted models', () => {
+		test('filters by mode for session-targeted models', () => {
 			const cloudNoTools = createSessionModel('cloud-basic', 'Cloud Basic', 'cloud', {
 				capabilities: { toolCalling: false, agentMode: false },
 			});
@@ -283,6 +318,64 @@ suite('ChatInputModelUtils', () => {
 				ChatAgentLocation.Chat,
 			);
 			// Session-type filtering also checks mode and inline chat support
+			assert.deepStrictEqual(result.map(m => m.metadata.id), ['cloud-gpt']);
+		});
+
+		test('keeps unscoped BYOK models selectable alongside session-targeted models', () => {
+			const byok = createVendorModel('openai-compatible', 'my-endpoint', 'My Endpoint');
+			const result = filterModelsForSession(
+				[gpt4o, byok, cloudModel],
+				'cloud',
+				ChatModeKind.Ask,
+				ChatAgentLocation.Chat,
+			);
+			assert.deepStrictEqual(result.map(m => m.metadata.id), ['cloud-gpt', 'my-endpoint']);
+		});
+
+		test('keeps unscoped BYOK models out of a targeted pool when not selectable', () => {
+			const byok = createVendorModel('openai-compatible', 'my-endpoint', 'My Endpoint', { isUserSelectable: false });
+			const result = filterModelsForSession(
+				[cloudModel, byok],
+				'cloud',
+				ChatModeKind.Ask,
+				ChatAgentLocation.Chat,
+			);
+			assert.deepStrictEqual(result.map(m => m.metadata.id), ['cloud-gpt']);
+		});
+
+		test('filters out unscoped BYOK models incompatible with Agent mode', () => {
+			const byok = createVendorModel('openai-compatible', 'my-endpoint', 'My Endpoint', {
+				capabilities: { toolCalling: false, agentMode: false },
+			});
+			const result = filterModelsForSession(
+				[cloudModel, byok],
+				'cloud',
+				ChatModeKind.Agent,
+				ChatAgentLocation.Chat,
+			);
+			assert.deepStrictEqual(result.map(m => m.metadata.id), ['cloud-gpt']);
+		});
+
+		test('filters out unscoped BYOK models incompatible with inline chat', () => {
+			const byok = createVendorModel('openai-compatible', 'my-endpoint', 'My Endpoint', {
+				capabilities: { toolCalling: false },
+			});
+			const result = filterModelsForSession(
+				[cloudModel, byok],
+				'cloud',
+				ChatModeKind.Ask,
+				ChatAgentLocation.EditorInline,
+			);
+			assert.deepStrictEqual(result.map(m => m.metadata.id), ['cloud-gpt']);
+		});
+
+		test('excludes non-BYOK general models from a session-targeted pool', () => {
+			const result = filterModelsForSession(
+				[gpt4o, claude, cloudModel],
+				'cloud',
+				ChatModeKind.Ask,
+				ChatAgentLocation.Chat,
+			);
 			assert.deepStrictEqual(result.map(m => m.metadata.id), ['cloud-gpt']);
 		});
 
@@ -364,6 +457,15 @@ suite('ChatInputModelUtils', () => {
 			const models = [createSessionModel('cloud-gpt', 'Cloud GPT', 'cloud')];
 			assert.strictEqual(hasModelsTargetingSession(models, 'enterprise'), false);
 		});
+
+		test('ignores entries without metadata', () => {
+			const withoutMetadata = { identifier: 'broken/model' } as unknown as ILanguageModelChatMetadataAndIdentifier;
+			assert.strictEqual(hasModelsTargetingSession([withoutMetadata], 'cloud'), false);
+			assert.strictEqual(
+				hasModelsTargetingSession([withoutMetadata, createSessionModel('cloud-gpt', 'Cloud GPT', 'cloud')], 'cloud'),
+				true,
+			);
+		});
 	});
 
 	suite('isModelValidForSession', () => {
@@ -393,11 +495,62 @@ suite('ChatInputModelUtils', () => {
 			assert.strictEqual(isModelValidForSession(generalModel, allModels, 'cloud'), false);
 		});
 
+		test('unscoped BYOK model is valid when pool has models targeting the session', () => {
+			const byok = createVendorModel('openai-compatible', 'my-endpoint', 'My Endpoint');
+			const sessionModel = createSessionModel('cloud-gpt', 'Cloud GPT', 'cloud');
+			const allModels = [byok, sessionModel];
+			assert.strictEqual(isModelValidForSession(byok, allModels, 'cloud'), true);
+		});
+
+		test('local session pool is not scoped by models targeting local', () => {
+			const localModel = createSessionModel('local-gpt', 'Local GPT', 'local');
+			const generalModel = createModel('gpt', 'GPT');
+			const byok = createVendorModel('openai-compatible', 'my-endpoint', 'My Endpoint');
+			const allModels = [localModel, generalModel, byok];
+			assert.deepStrictEqual({
+				localModel: isModelValidForSession(localModel, allModels, 'local'),
+				generalModel: isModelValidForSession(generalModel, allModels, 'local'),
+				byok: isModelValidForSession(byok, allModels, 'local'),
+			}, {
+				localModel: false,
+				generalModel: true,
+				byok: true,
+			});
+		});
+
 		test('model targeting wrong session is NOT valid', () => {
 			const wrongSessionModel = createSessionModel('ent-gpt', 'Enterprise GPT', 'enterprise');
 			const cloudModel = createSessionModel('cloud-gpt', 'Cloud GPT', 'cloud');
 			const allModels = [wrongSessionModel, cloudModel];
 			assert.strictEqual(isModelValidForSession(wrongSessionModel, allModels, 'cloud'), false);
+		});
+
+		test('model without metadata is NOT valid', () => {
+			// Cached model entries are read back from storage unvalidated.
+			const withoutMetadata = { identifier: 'broken/model' } as unknown as ILanguageModelChatMetadataAndIdentifier;
+			const generalModel = createModel('gpt', 'GPT');
+			assert.strictEqual(isModelValidForSession(withoutMetadata, [withoutMetadata, generalModel], undefined), false);
+			// A broken entry in the pool must not throw when the pool is scanned.
+			assert.strictEqual(isModelValidForSession(generalModel, [withoutMetadata, generalModel], 'cloud'), true);
+		});
+
+		test('non-selectable models are NOT valid', () => {
+			const hiddenBYOK = createVendorModel('openai-compatible', 'hidden-endpoint', 'Hidden Endpoint', { isUserSelectable: false });
+			const hiddenTargeted = createSessionModel('hidden-gpt', 'Hidden GPT', 'cloud', { isUserSelectable: false });
+			const hiddenGeneral = createModel('hidden-general', 'Hidden General', { isUserSelectable: false });
+			const allModels = [createModel('gpt', 'GPT'), hiddenBYOK, hiddenTargeted, hiddenGeneral];
+			// The picker hides these, so a restored selection must not be treated as usable.
+			assert.deepStrictEqual({
+				byokInScopedPool: isModelValidForSession(hiddenBYOK, allModels, 'cloud'),
+				byokInGeneralPool: isModelValidForSession(hiddenBYOK, allModels, undefined),
+				targetedInScopedPool: isModelValidForSession(hiddenTargeted, allModels, 'cloud'),
+				generalInGeneralPool: isModelValidForSession(hiddenGeneral, allModels, undefined),
+			}, {
+				byokInScopedPool: false,
+				byokInGeneralPool: false,
+				targetedInScopedPool: false,
+				generalInGeneralPool: false,
+			});
 		});
 
 		test('general model is valid when session type is undefined', () => {
