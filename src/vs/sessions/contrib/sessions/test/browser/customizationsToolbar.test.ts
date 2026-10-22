@@ -12,6 +12,7 @@ import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { constObservable, derived, observableValue } from '../../../../../base/common/observable.js';
+import { isWeb } from '../../../../../base/common/platform.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { mock, upcastPartial } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
@@ -22,7 +23,7 @@ import { IAICustomizationItemsModel } from '../../../../../workbench/contrib/cha
 import { CustomizationMigrationCategoryId } from '../../../../../workbench/contrib/chat/browser/aiCustomization/customizationMigrationCategories.js';
 import { getCustomizationMigrationGroupIgnoreKey, storeIgnoredCustomizationMigrationGroupKeys } from '../../../../../workbench/contrib/chat/browser/aiCustomization/customizationMigrationIgnoredGroups.js';
 import { IAgentHostToolSetEnablementService } from '../../../../../workbench/contrib/chat/browser/agentSessions/agentHost/agentHostToolSetEnablementService.js';
-import { IAICustomizationWorkspaceService } from '../../../../../workbench/contrib/chat/common/aiCustomizationWorkspaceService.js';
+import { AICustomizationManagementSection, IAICustomizationWorkspaceService } from '../../../../../workbench/contrib/chat/common/aiCustomizationWorkspaceService.js';
 import { ICustomizationHarnessService, IHarnessDescriptor } from '../../../../../workbench/contrib/chat/common/customizationHarnessService.js';
 import { CustomizationMigrationType, ICustomizationMigrationHint, ICustomizationMigrationIgnoredGroup, ICustomizationMigrationService } from '../../../../../workbench/contrib/chat/common/promptSyntax/service/customizationMigrationService.js';
 import { PromptsStorage } from '../../../../../workbench/contrib/chat/common/promptSyntax/service/promptsService.js';
@@ -30,7 +31,7 @@ import { ILanguageModelToolsService, IToolData, IToolSet } from '../../../../../
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 import { IActiveSession } from '../../../../services/sessions/common/sessionsManagement.js';
 import { IAICustomizationMcpServerCountService } from '../../browser/customizationMcpServerCount.js';
-import { CustomizationLinkViewItem, readCustomizationCount } from '../../browser/customizationsToolbar.contribution.js';
+import { CUSTOMIZATION_ITEMS, CustomizationLinkViewItem, readCustomizationCount } from '../../browser/customizationsToolbar.contribution.js';
 import { CustomizationsNavigationState } from '../../browser/customizationsNavigationState.js';
 
 suite('Customizations toolbar', () => {
@@ -73,6 +74,37 @@ suite('Customizations toolbar', () => {
 		)).get();
 
 		assert.strictEqual(count, 1);
+	});
+
+	test('gates Canvases on desktop and the shared enablement setting', () => {
+		const canvases = CUSTOMIZATION_ITEMS.find(item => item.section === AICustomizationManagementSection.Canvases);
+		const evaluate = (enabled: boolean) => canvases?.when?.evaluate({
+			getValue: <T>(key: string) => ({ 'config.chat.canvases.enabled': enabled }[key] as T | undefined),
+		}) ?? true;
+
+		assert.deepStrictEqual({
+			enabled: evaluate(true),
+			disabled: evaluate(false),
+		}, {
+			enabled: !isWeb,
+			disabled: false,
+		});
+	});
+
+	test('keeps Canvases separate from the VS Code Extensions section', () => {
+		const sections = CUSTOMIZATION_ITEMS
+			.filter(item => item.section === AICustomizationManagementSection.Extensions || item.section === AICustomizationManagementSection.Canvases)
+			.map(item => ({ id: item.id, label: item.label, section: item.section }));
+
+		assert.deepStrictEqual(sections, [{
+			id: 'sessions.customization.canvases',
+			label: 'Canvases',
+			section: AICustomizationManagementSection.Canvases,
+		}, {
+			id: 'sessions.customization.extensions',
+			label: 'Extensions',
+			section: AICustomizationManagementSection.Extensions,
+		}]);
 	});
 
 	test('tracks the active customization total and migration availability', async () => {
